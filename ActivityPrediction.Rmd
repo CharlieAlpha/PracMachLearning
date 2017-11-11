@@ -1,0 +1,123 @@
+---
+title: "Exercise Prediction with Random Forests"
+author: "Christian Andrews"
+date: "November 10, 2017"
+output: html_document
+---
+<style type="text/css">
+
+body, td {
+   font-size: 13px;
+}
+code.r{
+  font-size: 10px;
+}
+pre {
+  font-size: 10px
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("/home/christian/Documents/Coursera/Machine Learning/Project")
+```
+
+### Executive summary
+
+#### Problem:
+Using activity trackers such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, or to find patterns in their behavior. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+(Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes
+
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz4y5Bm6Y2o
+
+The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set.
+
+The final resulting model performed very well and did not appear to suffer significant overfitting.
+
+### Data import and clean up:
+The training data for this project are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv).
+
+The test data are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv).
+
+The Caret package is required for this analysis.
+```{r message=FALSE}
+library(caret)
+set.seed(314159)
+```
+
+Import the data sets and capture NA and Divide by 0 errors
+```{r}
+trainingSetFull <- read.csv("./data/pml-training.csv",na.strings=c("NA","","#DIV/0!"))
+testingSet <- read.csv("./data/pml-training.csv",na.strings=c("NA","","#DIV/0!"))
+```
+
+Begin by creating a training and validation set. Then calculate the nymber of features that have a significant amount of missing infomation. 
+```{r}
+#Built training and validation sets: 70% / 30%
+inTrain <- createDataPartition(y = trainingSetFull$classe, p = 7/10, list = FALSE)
+trainingSet <- trainingSetFull[inTrain, ]
+validationSet <- trainingSetFull[-inTrain,]
+
+#Calculate NA total by feature
+cummNaInColumn <- apply(trainingSet, 2, function(d){sum(is.na(d))})
+
+hist(cummNaInColumn, breaks=100, xlab='NA counts per feature', main='Distribution of NA Totals in Training set')
+```
+
+Judging by the results of the histogram, there are many features with very little information. These features will be removed along with columns that are not relevant to the exercise (pun intended).
+
+User name, New Window and time stamp variables should be ignored since they are not relevant to building a generalized model to predict the activity based on tracker data.
+
+```{r}
+#Remove features:
+cummNaInColumn[1]=1000 #user Name
+cummNaInColumn[2]=1000 #raw time stamp 1
+cummNaInColumn[3]=1000 #raw time stamp 2
+cummNaInColumn[4]=1000 #cvtd time stamp
+cummNaInColumn[5]=1000 #new window
+cummNaInColumn[6]=1000 #new window int
+
+#Only take features with a full dataset (where NA count is 0)
+cleantrainingSet <- trainingSet[, which(cummNaInColumn == 0)]
+```
+
+### The Model (and cross-validation):
+Typically, for a classification problem with p features, √p (rounded down) features are used in each split. In this case we have 51 features, so we will use floor(√51) = 7 folds for cross-validation. Fewer folds will yeild results faster but precision may suffer. Additional folds will take a significant amount of time to calculate (trust me).
+
+In this case, I chose to use the random forest model.
+```{r message=FALSE}
+forestFit <- train(classe ~ ., method = "rf", data = cleantrainingSet, trControl = trainControl(method = "cv", number = 7))
+```
+
+
+### Model Results
+Reviewing the model, specially the Confusion Matrix below, you can see that each excerise type A to E had a very low classificaiton rate rate. This is good but may present a problem with overfitting to the test data to follow.
+```{r}
+print(forestFit$finalModel)
+```
+
+Additional information about the model can be seen by the plot of the final model.
+```{r}
+plot(forestFit$finalModel)
+```
+
+### Model Validation
+Now to test the Random Forest model against the validation data. This is done to pre-test before testing on the actual, final, real test data to see the out of sample error rate we should expect. From the information below you can see we should expect a 99.8% Accuracy or 0.02% Out of Sample Error
+```{r}
+predRF <- predict(forestFit, validationSet)
+
+confusionMatrix(predRF, validationSet$classe)
+```
+
+
+### Final Testing
+The model perfomed very well with an Accuracy of 99.96% but slightly higher than expected 0.04% Out of Sample Error
+```{r}
+predFinalTest <- predict(forestFit, newdata = testingSet)
+accuracy <- sum(predFinalTest == testingSet$classe)/length(predFinalTest)
+oos_error <- 1 - accuracy
+print(oos_error)
+```
